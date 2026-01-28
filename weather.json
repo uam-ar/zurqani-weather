@@ -4,15 +4,15 @@
     "lat": 33.6289,
     "lon": -91.7909,
     "timezone": "America/Chicago",
-    "generated_utc": "2026-01-28T01:27:26.394532+00:00"
+    "generated_utc": "2026-01-28T01:31:47.181374+00:00"
   },
   "current": {
-    "time": "2026-01-27T19:15",
-    "temperature_c": 0.8,
-    "apparent_temperature_c": -3.5,
-    "humidity_pct": 74,
-    "wind_speed_kmh": 11.8,
-    "wind_direction_deg": 200,
+    "time": "2026-01-27T19:30",
+    "temperature_c": 0.6,
+    "apparent_temperature_c": -3.7,
+    "humidity_pct": 75,
+    "wind_speed_kmh": 11.6,
+    "wind_direction_deg": 196,
     "weather_code": 3
   },
   "daily": [
