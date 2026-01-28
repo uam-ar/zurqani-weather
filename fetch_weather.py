@@ -4,84 +4,88 @@ import urllib.request
 from datetime import datetime, timezone
 
 # =========================
-# CONFIG (EDIT THESE)
+# CONFIG (EDIT THIS)
 # =========================
-LAT = 33.6289      # <-- campus latitude
-LON = -91.7909     # <-- campus longitude
-TZ  = "America/Chicago"  # <-- campus timezone (IANA)
-DAYS = 7           # forecast length
+PLACE_NAME = "Monticello, AR"
+LAT = 33.6289
+LON = -91.7909
+TZ = "America/Chicago"  # Open-Meteo timezone for daily dates
+# =========================
 
-# Open-Meteo: current + hourly + daily in one call (no API key)
-URL = (
+OPEN_METEO_URL = (
     "https://api.open-meteo.com/v1/forecast"
     f"?latitude={LAT}&longitude={LON}"
+    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code"
+    "&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max"
     f"&timezone={TZ}"
-    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,weather_code"
-    "&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m,weather_code"
-    "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code"
-    f"&forecast_days={DAYS}"
 )
 
 def fetch_json(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "UniversityWeatherBot/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "zurqani-weather (github pages widget)"
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read().decode("utf-8")
+    return json.loads(data)
 
-def compact_payload(raw: dict) -> dict:
-    now = datetime.now(timezone.utc).isoformat()
+def safe_get(dct, *keys, default=None):
+    cur = dct
+    for k in keys:
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
 
-    current = raw.get("current", {})
-    daily = raw.get("daily", {})
+def main():
+    data = fetch_json(OPEN_METEO_URL)
 
-    # Build daily array
-    times = daily.get("time", []) or []
-    tmax  = daily.get("temperature_2m_max", []) or []
-    tmin  = daily.get("temperature_2m_min", []) or []
-    pprob = daily.get("precipitation_probability_max", []) or []
-    psum  = daily.get("precipitation_sum", []) or []
+    current = safe_get(data, "current", default={}) or {}
+    daily = safe_get(data, "daily", default={}) or {}
+
+    # Build daily array for 7 days
+    dates = daily.get("time", []) or []
+    tmax = daily.get("temperature_2m_max", []) or []
+    tmin = daily.get("temperature_2m_min", []) or []
     wcode = daily.get("weather_code", []) or []
+    pprob = daily.get("precipitation_probability_max", []) or []
 
-    days = []
-    for i in range(min(len(times), len(tmax), len(tmin))):
-        days.append({
-            "date": times[i],
-            "tmax_c": tmax[i],
-            "tmin_c": tmin[i],
-            "precip_prob_pct": pprob[i] if i < len(pprob) else None,
-            "precip_sum_mm": psum[i] if i < len(psum) else None,
+    daily_out = []
+    for i in range(min(7, len(dates))):
+        daily_out.append({
+            "date": dates[i],
+            "tmax_c": tmax[i] if i < len(tmax) else None,
+            "tmin_c": tmin[i] if i < len(tmin) else None,
             "weather_code": wcode[i] if i < len(wcode) else None,
+            "precip_prob_pct": pprob[i] if i < len(pprob) else None,
         })
 
-    payload = {
+    out = {
         "meta": {
-            "source": "open-meteo",
+            "place_name": PLACE_NAME,
             "lat": LAT,
             "lon": LON,
             "timezone": TZ,
-            "generated_utc": now
+            "source": "open-meteo",
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
         },
         "current": {
-            "time": current.get("time"),
             "temperature_c": current.get("temperature_2m"),
-            "apparent_temperature_c": current.get("apparent_temperature"),
+            "feels_like_c": current.get("apparent_temperature"),
             "humidity_pct": current.get("relative_humidity_2m"),
             "wind_speed_kmh": current.get("wind_speed_10m"),
-            "wind_direction_deg": current.get("wind_direction_10m"),
             "weather_code": current.get("weather_code"),
         },
-        "daily": days
+        "daily": daily_out
     }
-    return payload
-
-def main():
-    raw = fetch_json(URL)
-    payload = compact_payload(raw)
 
     with open("weather.json", "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(out, f, ensure_ascii=False, indent=2)
 
     print("Wrote weather.json")
 
 if __name__ == "__main__":
     main()
-
