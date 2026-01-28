@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 # =========================
 # CONFIG (EDIT THESE)
 # =========================
-LAT = 42.2814      # <-- campus latitude
-LON = -85.5889     # <-- campus longitude
+LAT = 33.6289      # <-- campus latitude
+LON = -91.7909     # <-- campus longitude
 TZ  = "America/Chicago"  # <-- campus timezone (IANA)
 DAYS = 7           # forecast length
 
@@ -84,3 +84,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
