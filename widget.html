@@ -140,8 +140,8 @@
       height: 120px;
     }
 
-    /* Tooltip */
-    .hourlyTooltip{
+    /* Tooltip (used for hourly + sparkline) */
+    .tooltip{
       position: absolute;
       display: none;
       pointer-events: none;
@@ -155,8 +155,9 @@
       color: #111;
       transform: translate(-50%, -110%);
       white-space: nowrap;
+      z-index: 10;
     }
-    .hourlyTooltip .sub{
+    .tooltip .sub{
       display:block;
       margin-top: 2px;
       font-size: 11px;
@@ -346,11 +347,22 @@
     }
   }
 
+  function hourLabelFromTimeStr(t){
+    if (!t || t.indexOf("T") === -1) return "";
+    var hh = parseInt(t.split("T")[1].slice(0,2), 10);
+    if (isNaN(hh)) return "";
+    var ampm = (hh >= 12) ? "p" : "a";
+    var h12 = hh % 12; if (h12 === 0) h12 = 12;
+    return String(h12) + ampm;
+  }
+
+  // Sparkline w/ points returned for tooltip
   function drawSparkline(canvas, values){
     var ctx = canvas.getContext("2d");
     var w = canvas.width, h = canvas.height;
     ctx.clearRect(0,0,w,h);
-    if (!values || values.length < 2) return;
+
+    if (!values || values.length < 2) return { points: [] };
 
     var min = Infinity, max = -Infinity;
     values.forEach(function(v){
@@ -363,6 +375,7 @@
     function x(i){ return (i/(values.length-1)) * (w-10) + 5; }
     function y(v){ return (h-8) - ((v-min)/(max-min))*(h-16) + 4; }
 
+    // line
     ctx.beginPath();
     values.forEach(function(v,i){
       if (v == null) return;
@@ -374,22 +387,19 @@
     ctx.lineWidth = 2;
     ctx.stroke();
 
+    // points + collect
+    var points = [];
     values.forEach(function(v,i){
       if (v == null) return;
+      var px = x(i), py = y(v);
       ctx.beginPath();
-      ctx.arc(x(i), y(v), 3.5, 0, Math.PI*2);
+      ctx.arc(px, py, 3.5, 0, Math.PI*2);
       ctx.fillStyle = "#111";
       ctx.fill();
+      points.push({ i: i, x: px, y: py, v: v });
     });
-  }
 
-  function hourLabelFromTimeStr(t){
-    if (!t || t.indexOf("T") === -1) return "";
-    var hh = parseInt(t.split("T")[1].slice(0,2), 10);
-    if (isNaN(hh)) return "";
-    var ampm = (hh >= 12) ? "p" : "a";
-    var h12 = hh % 12; if (h12 === 0) h12 = 12;
-    return String(h12) + ampm;
+    return { points: points };
   }
 
   // Hourly chart: temp line + precip bars + tooltip points return
@@ -493,6 +503,75 @@
     return { points: points };
   }
 
+  // Generic tooltip helpers (works for both charts)
+  function attachTooltipToCanvas(canvas, tipEl, getStateFn, formatHtmlFn, hitRadius){
+    if (!canvas || !tipEl) return;
+
+    function showTip(pt, clientX, clientY){
+      tipEl.style.display = "block";
+      tipEl.innerHTML = formatHtmlFn(pt);
+
+      var wrap = tipEl.parentElement; // must be positioned relative
+      var rect = wrap.getBoundingClientRect();
+      tipEl.style.left = (clientX - rect.left) + "px";
+      tipEl.style.top  = (clientY - rect.top) + "px";
+    }
+
+    function hideTip(){
+      tipEl.style.display = "none";
+    }
+
+    function nearestPoint(clientX, clientY){
+      var rect = canvas.getBoundingClientRect();
+      var x = clientX - rect.left;
+      var y = clientY - rect.top;
+
+      var state = getStateFn();
+      var pts = (state && state.points) ? state.points : [];
+
+      var best = null;
+      var bestD = Infinity;
+      var R = hitRadius || 12;
+
+      pts.forEach(function(pt){
+        var dx = pt.x - x;
+        var dy = pt.y - y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d < bestD){
+          bestD = d;
+          best = pt;
+        }
+      });
+
+      if (best && bestD <= R) return best;
+      return null;
+    }
+
+    canvas.addEventListener("mousemove", function(e){
+      var pt = nearestPoint(e.clientX, e.clientY);
+      if (pt) showTip(pt, e.clientX, e.clientY);
+      else hideTip();
+    });
+    canvas.addEventListener("mouseleave", hideTip);
+
+    canvas.addEventListener("touchstart", function(e){
+      if (!e.touches || !e.touches[0]) return;
+      var t = e.touches[0];
+      var pt = nearestPoint(t.clientX, t.clientY);
+      if (pt) showTip(pt, t.clientX, t.clientY);
+    }, { passive: true });
+
+    canvas.addEventListener("touchmove", function(e){
+      if (!e.touches || !e.touches[0]) return;
+      var t = e.touches[0];
+      var pt = nearestPoint(t.clientX, t.clientY);
+      if (pt) showTip(pt, t.clientX, t.clientY);
+      else hideTip();
+    }, { passive: true });
+
+    canvas.addEventListener("touchend", hideTip, { passive: true });
+  }
+
   fetch(WEATHER_JSON_URL, { cache: "no-store" })
     .then(function(r){
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -534,6 +613,12 @@
                     "<span>Gust: <strong>" + gustPart + "</strong></span>";
       }
 
+      // Build daily highs + dates for spark tooltip
+      var highsF = daily.slice(0,7).map(function(d){
+        return (d.tmax_c==null) ? null : cToF(d.tmax_c);
+      });
+      var highDates = daily.slice(0,7).map(function(d){ return d.date; });
+
       var nowHtml =
         "<div class='nowRow'>" +
           "<div class='bigIcon' aria-hidden='true'>" + icon(cur.weather_code) + "</div>" +
@@ -552,15 +637,42 @@
           "</div>" +
           "<div class='sparkWrap'>" +
             "<div class='sparkLabel'>Daily highs (°F)</div>" +
-            "<canvas id='spark' width='170' height='42'></canvas>" +
+            "<div style='position:relative;'>" +
+              "<canvas id='spark' width='170' height='42'></canvas>" +
+              "<div id='sparkTip' class='tooltip'></div>" +
+            "</div>" +
           "</div>" +
         "</div>";
 
       document.getElementById("nowBlock").innerHTML = nowHtml;
 
+      // Draw spark + tooltip
+      var spark = document.getElementById("spark");
+      var sparkTip = document.getElementById("sparkTip");
+      var sparkState = { points: [] };
+
+      if (spark){
+        sparkState = drawSparkline(spark, highsF);
+
+        // Add date + value to point objects (by index)
+        sparkState.points.forEach(function(pt){
+          pt.date = highDates[pt.i] || "";
+        });
+
+        attachTooltipToCanvas(
+          spark,
+          sparkTip,
+          function(){ return sparkState; },
+          function(pt){
+            return "<span>" + (pt.date ? pt.date + ": " : "") + "High " + Math.round(pt.v) + "°F</span>";
+          },
+          10
+        );
+      }
+
       // Hourly chart block + tooltip
       if (hourly && hourly.length){
-        var tempsF = hourly.map(function(h){ return (h.temperature_c==null)?null:cToF(h.temperature_c); });
+        var tempsFh = hourly.map(function(h){ return (h.temperature_c==null)?null:cToF(h.temperature_c); });
         var pops = hourly.map(function(h){ return h.precip_prob_pct; });
         var labels = hourly.map(function(h){ return hourLabelFromTimeStr(h.time); });
 
@@ -572,7 +684,7 @@
             "</div>" +
             "<div class='hourlyCanvasWrap'>" +
               "<canvas id='hourlyChart'></canvas>" +
-              "<div id='hourlyTip' class='hourlyTooltip'></div>" +
+              "<div id='hourlyTip' class='tooltip'></div>" +
             "</div>" +
           "</div>";
 
@@ -581,75 +693,22 @@
         var hc = document.getElementById("hourlyChart");
         var tip = document.getElementById("hourlyTip");
 
-        var chartState = drawHourly(hc, tempsF, pops, labels);
+        var hourlyState = drawHourly(hc, tempsFh, pops, labels);
 
-        function showTip(pt, clientX, clientY){
-          if (!tip) return;
-          tip.style.display = "block";
-          tip.innerHTML =
-            "<span>" + pt.label + ": " + Math.round(pt.t) + "°F</span>" +
-            (pt.p == null ? "" : "<span class='sub'>Precip: " + pt.p + "%</span>");
-
-          var wrap = hc.parentElement;
-          var rect = wrap.getBoundingClientRect();
-          tip.style.left = (clientX - rect.left) + "px";
-          tip.style.top  = (clientY - rect.top) + "px";
-        }
-
-        function hideTip(){
-          if (tip) tip.style.display = "none";
-        }
-
-        function nearestPoint(clientX, clientY){
-          var rect = hc.getBoundingClientRect();
-          var x = clientX - rect.left;
-          var y = clientY - rect.top;
-
-          var best = null;
-          var bestD = Infinity;
-          var R = 12;
-
-          chartState.points.forEach(function(pt){
-            var dx = pt.x - x;
-            var dy = pt.y - y;
-            var d = Math.sqrt(dx*dx + dy*dy);
-            if (d < bestD){
-              bestD = d;
-              best = pt;
-            }
-          });
-
-          if (best && bestD <= R) return best;
-          return null;
-        }
-
-        hc.addEventListener("mousemove", function(e){
-          var pt = nearestPoint(e.clientX, e.clientY);
-          if (pt) showTip(pt, e.clientX, e.clientY);
-          else hideTip();
-        });
-        hc.addEventListener("mouseleave", hideTip);
-
-        hc.addEventListener("touchstart", function(e){
-          if (!e.touches || !e.touches[0]) return;
-          var t = e.touches[0];
-          var pt = nearestPoint(t.clientX, t.clientY);
-          if (pt) showTip(pt, t.clientX, t.clientY);
-        }, { passive: true });
-
-        hc.addEventListener("touchmove", function(e){
-          if (!e.touches || !e.touches[0]) return;
-          var t = e.touches[0];
-          var pt = nearestPoint(t.clientX, t.clientY);
-          if (pt) showTip(pt, t.clientX, t.clientY);
-          else hideTip();
-        }, { passive: true });
-
-        hc.addEventListener("touchend", hideTip, { passive: true });
+        attachTooltipToCanvas(
+          hc,
+          tip,
+          function(){ return hourlyState; },
+          function(pt){
+            return "<span>" + pt.label + ": " + Math.round(pt.t) + "°F</span>" +
+                   (pt.p == null ? "" : "<span class='sub'>Precip: " + pt.p + "%</span>");
+          },
+          12
+        );
 
         window.addEventListener("resize", function(){
-          chartState = drawHourly(hc, tempsF, pops, labels);
-          hideTip();
+          hourlyState = drawHourly(hc, tempsFh, pops, labels);
+          tip.style.display = "none";
         });
       } else {
         document.getElementById("hourlyBlock").innerHTML = "";
@@ -676,13 +735,6 @@
           "</tr></thead>" +
           "<tbody>" + rows + "</tbody>" +
         "</table>";
-
-      // sparkline highs
-      var highsF = daily.slice(0,7).map(function(d){
-        return (d.tmax_c==null) ? null : cToF(d.tmax_c);
-      });
-      var canvas = document.getElementById("spark");
-      if (canvas) drawSparkline(canvas, highsF);
 
       document.getElementById("updated").textContent = "Updated (UTC): " + safe(meta.generated_utc);
       document.getElementById("source").textContent = "Source: " + safe(meta.source);
