@@ -25,7 +25,8 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 16px;
-      background: var(--card-bg);
+      // background: var(--card-bg);
+      background: #f5f4ef; /* fixed neutral color , #f5f4ef → warm academic , #ffffff → clean white , #f2f4f7 → modern gray */
       box-shadow: var(--shadow);
     }
 
@@ -363,7 +364,7 @@ function drawSparkline(canvas, values){
       document.getElementById("locPill").textContent = meta.place_name || "Location";
 
       var card = document.getElementById("card");
-      card.classList.add(themeClass(cur.weather_code));
+      // card.classList.add(themeClass(cur.weather_code));
 
       var tC = cur.temperature_c;
       var tF = (tC == null) ? null : cToF(tC);
