@@ -2,7 +2,7 @@ name: Update weather feed
 
 on:
   schedule:
-    - cron: "15 * * * *"
+    - cron: "15 * * * *"  # every hour at :15 UTC
   workflow_dispatch:
 
 permissions:
@@ -27,10 +27,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           if [ -f weather.json ]; then
             git add weather.json
-            git diff --cached --quiet || git commit -m "Update weather feed"
+            if git diff --cached --quiet; then
+              echo "No changes to commit."
+              exit 0
+            fi
+            git commit -m "Update weather feed"
             git push
           else
-            echo "weather.json not found (fetch script may have failed)."
+            echo "weather.json not found!"
+            exit 1
           fi
